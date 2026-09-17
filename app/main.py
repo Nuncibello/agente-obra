@@ -44,7 +44,7 @@ class Respuesta(BaseModel):
 
 
 def crear_app(indice: Indice | None = None, agente=None) -> FastAPI:
-    estado: dict = {"indice": indice, "agente": agente, "listo": asyncio.Event()}
+    estado: dict = {"indice": indice, "agente": agente, "listo": asyncio.Event(), "error": None}
 
     @asynccontextmanager
     async def ciclo(app: FastAPI):
@@ -61,14 +61,19 @@ def crear_app(indice: Indice | None = None, agente=None) -> FastAPI:
             estado["agente"] = modulo_agente.crear(estado["indice"])
 
         async def indexar():
-            t = time.perf_counter()
-            try:
-                n = await estado["indice"].cargar_carpeta(config.DOCS_DIR, config.CACHE_INDICE)
-                log.info("índice listo: %s fragmentos en %.1fs", n, time.perf_counter() - t)
-            except Exception:
-                log.exception("no se pudo indexar la documentación")
-            finally:
-                estado["listo"].set()
+            # reintenta con espera creciente: un error transitorio del proveedor no deja el índice vacío para siempre
+            for intento in range(5):
+                t = time.perf_counter()
+                try:
+                    n = await estado["indice"].cargar_carpeta(config.DOCS_DIR, config.CACHE_INDICE)
+                    estado["error"] = None
+                    log.info("índice listo: %s fragmentos en %.1fs", n, time.perf_counter() - t)
+                    break
+                except Exception as e:
+                    estado["error"] = f"{type(e).__name__}: {str(e)[:160]}"
+                    log.exception("no se pudo indexar la documentación (intento %s)", intento + 1)
+                    await asyncio.sleep(2 ** intento * 3)
+            estado["listo"].set()
 
         tarea = asyncio.create_task(indexar())  # el servicio arranca ya; el índice se arma en paralelo
         yield
@@ -90,7 +95,7 @@ def crear_app(indice: Indice | None = None, agente=None) -> FastAPI:
     @app.get("/salud")
     async def salud():
         i = estado["indice"]
-        return {"ok": True, "indice_listo": estado["listo"].is_set(),
+        return {"ok": estado["error"] is None, "indice_listo": estado["listo"].is_set(), "error": estado["error"],
                 "documentos": len(i.documentos()) if i else 0, "fragmentos": len(i.fragmentos) if i else 0,
                 "modelo": config.MODELO}
 
