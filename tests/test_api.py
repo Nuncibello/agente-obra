@@ -102,3 +102,9 @@ async def test_rechaza_formatos_no_soportados(cliente):
 async def test_salud(cliente):
     j = (await cliente.get("/salud")).json()
     assert j["ok"] and j["indice_listo"] and j["documentos"] == 1
+
+
+async def test_limite_de_consultas(cliente, monkeypatch):
+    for _ in range(20):
+        assert (await cliente.post("/preguntar", json={"pregunta": "hola hola"})).status_code == 200
+    assert (await cliente.post("/preguntar", json={"pregunta": "hola hola"})).status_code == 429

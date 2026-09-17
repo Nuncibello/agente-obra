@@ -81,6 +81,7 @@ En Cloud Run se despliega desde este repositorio (Cloud Build usa el `Dockerfile
   gratis. El reemplazo natural a escala es pgvector o Vertex AI Vector Search, sin tocar el agente.
 - **La herramienta devuelve la fuente con cada fragmento,** así las citas salen de datos reales y no
   de lo que el modelo recuerda.
+- **Demo pública protegida:** tope de 20 consultas y 5 subidas por IP por hora.
 - **Los fallos del modelo no tiran el servicio:** timeouts explícitos y errores 502/503/504 claros.
 - **La documentación de ejemplo** son fichas técnicas públicas de [LED Premium](https://www.ledpremium.com.ar),
   plataforma que desarrollé y mantengo.

@@ -17,7 +17,9 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from collections import defaultdict, deque
+
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -73,6 +75,17 @@ def crear_app(indice: Indice | None = None, agente=None) -> FastAPI:
         tarea.cancel()
 
     app = FastAPI(title="Asistente de obra", version="1.0.0", lifespan=ciclo)
+    consultas: dict[str, deque] = defaultdict(deque)
+
+    def limitar(request: Request, maximo: int = config.CONSULTAS_POR_HORA):
+        """Demo pública: tope de consultas por IP por hora, para que nadie agote la cuota del modelo."""
+        ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")).split(",")[0].strip()
+        ahora, cola = time.time(), consultas[ip]
+        while cola and ahora - cola[0] > 3600:
+            cola.popleft()
+        if len(cola) >= maximo:
+            raise HTTPException(429, "Llegaste al límite de consultas de la demo por esta hora")
+        cola.append(ahora)
 
     @app.get("/salud")
     async def salud():
@@ -86,7 +99,8 @@ def crear_app(indice: Indice | None = None, agente=None) -> FastAPI:
         return estado["indice"].documentos()
 
     @app.post("/documentos", status_code=201)
-    async def subir(archivo: UploadFile = File(...)):
+    async def subir(request: Request, archivo: UploadFile = File(...)):
+        limitar(request, maximo=5)
         nombre = Path(archivo.filename or "documento").name
         datos = await archivo.read(config.MAX_SUBIDA_BYTES + 1)
         if len(datos) > config.MAX_SUBIDA_BYTES:
@@ -104,7 +118,8 @@ def crear_app(indice: Indice | None = None, agente=None) -> FastAPI:
         return {"documento": nombre, "fragmentos_nuevos": n}
 
     @app.post("/preguntar", response_model=Respuesta)
-    async def preguntar(p: Pregunta):
+    async def preguntar(p: Pregunta, request: Request):
+        limitar(request)
         try:
             await asyncio.wait_for(estado["listo"].wait(), timeout=120)
         except asyncio.TimeoutError:
